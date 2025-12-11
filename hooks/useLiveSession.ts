@@ -1,5 +1,6 @@
+
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Tool, FunctionDeclaration, Type } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type } from '@google/genai';
 import { createPcmBlob, decodeAudioData, INPUT_SAMPLE_RATE, base64ToUint8Array } from '../utils/audio';
 
 // Tool Definition for Stage Management
@@ -29,9 +30,10 @@ interface UseLiveSessionProps {
   systemInstruction: string;
   onToolCall?: (toolCalls: any[]) => Promise<any[]>;
   model: string;
+  shouldSendVisual?: () => boolean; // New callback to check if we should send
 }
 
-export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemInstruction, onToolCall, model }: UseLiveSessionProps) => {
+export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemInstruction, onToolCall, model, shouldSendVisual }: UseLiveSessionProps) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,13 +80,21 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
       const processor = inputCtx.createScriptProcessor(4096, 1, 1);
       
       processor.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmBlob = createPcmBlob(inputData);
-        
-        if (sessionPromiseRef.current) {
-          sessionPromiseRef.current.then(session => {
-             session.sendRealtimeInput({ media: pcmBlob });
-          });
+        try {
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcmBlob = createPcmBlob(inputData);
+            
+            if (sessionPromiseRef.current) {
+              sessionPromiseRef.current.then(session => {
+                 if (session && session.sendRealtimeInput) {
+                    session.sendRealtimeInput({ media: pcmBlob });
+                 }
+              }).catch(err => {
+                 // Ignore during connect
+              });
+            }
+        } catch (e) {
+            // Ignore processing errors
         }
       };
       
@@ -94,6 +104,11 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
       // Setup Audio Output
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       audioContextRef.current = outputCtx;
+      
+      if (outputCtx.state === 'suspended') {
+        await outputCtx.resume();
+      }
+      
       nextStartTimeRef.current = outputCtx.currentTime;
 
       // Start Session
@@ -105,8 +120,8 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
             speechConfig: {
                 voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
             },
-            inputAudioTranscription: { model: model }, // Enable user transcription
-            outputAudioTranscription: { model: model }, // Enable model transcription
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
             tools: [{ functionDeclarations: [updateStageTool] }]
         },
         callbacks: {
@@ -114,50 +129,61 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
             console.log("Live Session Connected");
             setIsConnected(true);
             
-            // Start Visual Streaming Loop
+            // Start Optimized Visual Streaming Loop
             visualIntervalRef.current = window.setInterval(async () => {
-                 const context = await getVisualContext();
-                 if (context && sessionPromiseRef.current) {
-                     sessionPromiseRef.current.then(session => {
-                         if (context.type === 'image') {
-                             session.sendRealtimeInput({
-                                 media: { mimeType: 'image/jpeg', data: context.data }
-                             });
-                         }
-                     });
+                 try {
+                     // Only send if explicit change detected (if callback provided)
+                     if (shouldSendVisual && !shouldSendVisual()) {
+                         return;
+                     }
+
+                     const context = await getVisualContext();
+                     if (context && context.data && context.data.length > 100 && sessionPromiseRef.current) {
+                         sessionPromiseRef.current.then(session => {
+                             if (context.type === 'image') {
+                                 session.sendRealtimeInput({
+                                     media: { mimeType: 'image/jpeg', data: context.data }
+                                 });
+                             }
+                         }).catch(e => console.warn("Failed to send visual:", e));
+                     }
+                 } catch (e) {
+                     console.warn("Visual context error:", e);
                  }
             }, 3000); 
           },
           onmessage: async (msg: LiveServerMessage) => {
-            // Handle Audio
             const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData) {
                 setIsSpeaking(true);
-                const buffer = await decodeAudioData(
-                    base64ToUint8Array(audioData),
-                    outputCtx,
-                    24000
-                );
-                
-                const source = outputCtx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(outputCtx.destination);
-                
-                const now = outputCtx.currentTime;
-                const startTime = Math.max(now, nextStartTimeRef.current);
-                source.start(startTime);
-                nextStartTimeRef.current = startTime + buffer.duration;
-                
-                sourcesRef.current.add(source);
-                source.onended = () => {
-                    sourcesRef.current.delete(source);
-                    if (sourcesRef.current.size === 0) {
-                        setIsSpeaking(false);
-                    }
-                };
+                try {
+                    const buffer = await decodeAudioData(
+                        base64ToUint8Array(audioData),
+                        outputCtx,
+                        24000
+                    );
+                    
+                    const source = outputCtx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(outputCtx.destination);
+                    
+                    const now = outputCtx.currentTime;
+                    const startTime = Math.max(now, nextStartTimeRef.current);
+                    source.start(startTime);
+                    nextStartTimeRef.current = startTime + buffer.duration;
+                    
+                    sourcesRef.current.add(source);
+                    source.onended = () => {
+                        sourcesRef.current.delete(source);
+                        if (sourcesRef.current.size === 0) {
+                            setIsSpeaking(false);
+                        }
+                    };
+                } catch (e) {
+                    console.error("Audio decode error:", e);
+                }
             }
 
-            // Handle Transcriptions
             if (msg.serverContent?.outputTranscription?.text) {
                 setTranscript(prev => [...prev, { role: 'model', text: msg.serverContent?.outputTranscription?.text || '' }]);
             }
@@ -165,16 +191,18 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
                 setTranscript(prev => [...prev, { role: 'user', text: msg.serverContent?.inputTranscription?.text || '' }]);
             }
 
-            // Handle Tool Calls (Stage Updates)
             if (msg.toolCall) {
                 if (onToolCall) {
-                    const responses = await onToolCall(msg.toolCall.functionCalls);
-                    // Send tool response back
-                    sessionPromiseRef.current?.then(session => {
-                        session.sendToolResponse({
-                           functionResponses: responses
+                    try {
+                        const responses = await onToolCall(msg.toolCall.functionCalls);
+                        sessionPromiseRef.current?.then(session => {
+                            session.sendToolResponse({
+                               functionResponses: responses
+                            });
                         });
-                    });
+                    } catch (e) {
+                        console.error("Tool call error:", e);
+                    }
                 }
             }
           },
@@ -208,12 +236,16 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
       streamRef.current = null;
     }
     if (inputAudioContextRef.current) {
-      inputAudioContextRef.current.close();
+      if (inputAudioContextRef.current.state !== 'closed') {
+        inputAudioContextRef.current.close();
+      }
       inputAudioContextRef.current = null;
     }
     if (audioContextRef.current) {
       stopAudioPlayback();
-      audioContextRef.current.close();
+      if (audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+      }
       audioContextRef.current = null;
     }
     
@@ -225,7 +257,7 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
     if (sessionPromiseRef.current) {
        sessionPromiseRef.current.then((session: any) => {
            if(session.close) session.close();
-       });
+       }).catch(() => {});
        sessionPromiseRef.current = null;
     }
   };

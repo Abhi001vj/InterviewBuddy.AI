@@ -1,13 +1,16 @@
-
 import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { TestCase, TestResult, DSAChallenge, ProgrammingLanguage, FeedbackReport, AssessmentResult } from "../types";
-import { ML_SYSTEM_DESIGN_RUBRIC, DSA_RUBRIC } from "../utils/rubrics";
 
 const getAI = () => {
   if (!process.env.API_KEY) {
     throw new Error("API Key missing");
   }
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
+};
+
+// Helper to interpolate variables into prompts
+const interpolate = (template: string, variables: Record<string, any>) => {
+  return template.replace(/{(\w+)}/g, (_, key) => variables[key] || `{${key}}`);
 };
 
 export const rewriteQuestion = async (
@@ -192,6 +195,7 @@ export const assessInterviewProgress = async (
     completedPhases: string[];
     roundType: string;
     rubric: string; // Dynamic rubric
+    promptTemplate?: string;
   },
   model: string
 ): Promise<AssessmentResult | null> => {
@@ -203,12 +207,7 @@ export const assessInterviewProgress = async (
       phase_completion: { type: Type.NUMBER },
       quality_scores: {
         type: Type.OBJECT,
-        properties: {
-          depth: { type: Type.NUMBER },
-          clarity: { type: Type.NUMBER },
-          technical: { type: Type.NUMBER },
-          practical: { type: Type.NUMBER }
-        }
+        nullable: true, 
       },
       red_flags: { type: Type.ARRAY, items: { type: Type.STRING } },
       green_flags: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -218,54 +217,51 @@ export const assessInterviewProgress = async (
       overall_impression: { type: Type.STRING },
       completed_substeps: { type: Type.ARRAY, items: { type: Type.STRING } }
     },
-    required: ["phase_completion", "quality_scores", "immediate_feedback", "next_phase_ready"]
+    required: ["phase_completion", "immediate_feedback", "next_phase_ready"]
   };
 
   try {
     const contentParts: any[] = [];
-    const isSystemDesign = snapshot.roundType === 'System Design';
-    const isDSA = snapshot.roundType === 'Data Structures & Algorithms';
-
-    // Add text prompt
-    const promptText = `
-    You are an expert Interview Assessor for a ${snapshot.roundType} interview.
     
-    Current Phase: ${snapshot.phase}
-    Time Spent: ${Math.floor(snapshot.timeSpent)} seconds
+    // Construct Prompt
+    let prompt = snapshot.promptTemplate || `You are an expert Interview Assessor for a ${snapshot.roundType} interview.`;
     
-    Recent Transcript:
-    ${snapshot.chatHistory.slice(-8).map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
+    // Interpolate basics if template provided, else use default logic
+    if (snapshot.promptTemplate) {
+        prompt = interpolate(snapshot.promptTemplate, {
+            interview_type: snapshot.roundType,
+            current_phase: snapshot.phase,
+            time_spent: snapshot.timeSpent,
+            completed_phases: snapshot.completedPhases.join(', '),
+            chat_history: snapshot.chatHistory.slice(-5).map(m => `${m.role}: ${m.text}`).join('\n'),
+            work_state: snapshot.codeContent || "Canvas Image provided",
+            guidelines: snapshot.rubric,
+            required_substeps: "See rubric",
+            expected_duration: "See rubric"
+        });
+    } else {
+        // Fallback prompt (similar to before)
+        prompt += `
+        Current Phase: ${snapshot.phase}
+        Time Spent: ${Math.floor(snapshot.timeSpent)} seconds
+        
+        Recent Transcript:
+        ${snapshot.chatHistory.slice(-8).map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
+        
+        GUIDELINES AND RUBRIC TO FOLLOW:
+        ${snapshot.rubric}
+        
+        Assess the candidate's performance in the CURRENT PHASE.
+        1. Have they completed the required sub-steps for this phase?
+        2. Are there red flags?
+        3. Are there green flags?
+        4. Should they move to the next phase?
+        
+        Provide actionable immediate feedback (1-2 sentences).
+        `;
+    }
     
-    Code Context: ${snapshot.codeContent ? snapshot.codeContent.slice(0, 500) : "No code"}
-    
-    GUIDELINES AND RUBRIC TO FOLLOW:
-    ${snapshot.rubric}
-    
-    ADDITIONAL PHASE RULES:
-    ${isSystemDesign ? `
-    1. Problem Framing: If time < 300s (5m) and candidate tries to switch, FLAG "Slow down! You skipped Business Objective".
-    2. Problem Framing: If candidate hasn't asked clarifying questions, PENALIZE quality score.
-    3. Modeling: If candidate proposes model without discussing Training Data first, FLAG RED "Discuss Training Data before Modeling".
-    4. Evaluation: Look for offline metrics (Precision/Recall) vs online (CTR). If present, FLAG GREEN "Good metric choice".
-    ` : ''}
-
-    ${isDSA ? `
-    1. Problem Understanding: Must ask clarification questions.
-    2. Implementation: Check for clean code.
-    3. Verification: FORCE candidate to verify solution (dry run/edge cases) before finishing. If they say "I'm done" without verifying, FLAG RED "Verify your solution with edge cases".
-    4. Complexity: Explicitly check for Time/Space analysis.
-    ` : ''}
-    
-    Assess the candidate's performance in the CURRENT PHASE.
-    1. Have they completed the required sub-steps for this phase?
-    2. Are there red flags (skipping steps, bad assumptions)?
-    3. Are there green flags (good questions, clear structure)?
-    4. Should they move to the next phase?
-    
-    Provide actionable immediate feedback (1-2 sentences) to guide them.
-    `;
-    
-    contentParts.push({ text: promptText });
+    contentParts.push({ text: prompt });
 
     // Add image if available
     if (snapshot.canvasImage) {
@@ -297,11 +293,10 @@ export const generateDetailedFeedback = async (
   transcript: { role: string, text: string }[],
   config: { roundType: string, company: string, role: string, question: string },
   rubric: string,
-  model: string
+  model: string,
+  reportTemplate?: string
 ): Promise<FeedbackReport | null> => {
   const ai = getAI();
-  const isSystemDesign = config.roundType === 'System Design';
-  const defaultRubric = isSystemDesign ? ML_SYSTEM_DESIGN_RUBRIC : DSA_RUBRIC;
 
   const schema: Schema = {
     type: Type.OBJECT,
@@ -327,23 +322,32 @@ export const generateDetailedFeedback = async (
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: `You are a Senior Bar Raiser at ${config.company}. You just conducted a ${config.roundType} interview for a ${config.role} candidate.
+    let prompt = reportTemplate ? interpolate(reportTemplate, {
+        target_level: "Candidate",
+        role: config.role,
+        interview_type: config.roundType,
+        duration: "45",
+        performance_summary: "See transcript",
+        full_chat_history: transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n'),
+        all_work_samples: "See context",
+        all_scores: "See context",
+        guidelines: rubric,
+        rubric: rubric
+    }) : `You are a Senior Bar Raiser at ${config.company}. You just conducted a ${config.roundType} interview.
       
       Question: ${config.question}
       
       Transcript:
       ${transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n')}
       
-      REFERENCE MATERIAL (GUIDELINES):
+      REFERENCE MATERIAL:
       ${rubric}
-
-      BASE SCORING RUBRIC:
-      ${defaultRubric}
       
-      Generate a detailed feedback report. Ensure you evaluate if the candidate followed the specific guidelines for ${config.company} if present in the reference material.
-      `,
+      Generate a detailed feedback report.`;
+
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: schema

@@ -44,7 +44,7 @@ export interface InterviewConfig {
 
 export interface DrawingShape {
   id: string;
-  type: 'rect' | 'cylinder' | 'line' | 'text' | 'arrow';
+  type: 'rect' | 'cylinder' | 'line' | 'text' | 'arrow' | 'actor';
   x: number;
   y: number;
   width?: number;
@@ -100,13 +100,17 @@ export interface RealTimeFeedback {
   timestamp: number;
 }
 
+export interface ScoringDimension {
+  id: string;
+  name: string;
+  weight: number;
+  criteria: string[];
+}
+
 export interface AssessmentResult {
   phase_completion: number; // 0-100
   quality_scores: {
-    depth: number;
-    clarity: number;
-    technical: number;
-    practical: number;
+    [key: string]: number; // Dynamic keys based on dimension
   };
   red_flags: string[];
   green_flags: string[];
@@ -128,4 +132,44 @@ export interface FeedbackReport {
     score: number; // 1-5
   }[];
   detailedAssessment: string; // Markdown
+}
+
+// Config Types
+export interface GuidelineType {
+  ml_design: string;
+  coding: string;
+  behavioral: string;
+}
+
+export interface RubricType {
+  ml_design: string;
+  coding: string;
+}
+
+export interface PromptType {
+  assessment: string;
+  feedback: string;
+  scoring: string;
+  report: string;
+}
+
+export interface SettingsType {
+  targetLevel: string;
+  enableRealtimeFeedback: boolean;
+  enableVoiceFeedback: boolean;
+  showProgressBar: boolean;
+  showLiveScores: boolean;
+  strictTiming: boolean;
+  assessmentFrequency: number;
+  feedbackVerbosity: string;
+}
+
+export interface FullConfig {
+  name?: string;
+  company: string;
+  role: string;
+  guidelines: GuidelineType;
+  rubrics: RubricType;
+  prompts: PromptType;
+  settings: SettingsType;
 }

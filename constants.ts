@@ -7,12 +7,16 @@ export const ROUNDS = Object.values(InterviewRound);
 export const LANGUAGES = Object.values(ProgrammingLanguage);
 
 export const TEXT_MODELS = [
-  { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro (Reasoning)' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Fast)' },
+  { id: 'gemini-2.0-flash-thinking-exp-01-21', name: 'Gemini 2.0 Flash Thinking (Reasoning)' },
+  { id: 'gemini-2.0-pro-exp-02-05', name: 'Gemini 2.0 Pro (Complex Tasks)' },
+  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Fast)' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
 ];
 
 export const LIVE_MODELS = [
-  { id: 'gemini-2.5-flash-native-audio-preview-09-2025', name: 'Gemini 2.5 Flash Live' }
+  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Live' },
+  { id: 'gemini-2.5-flash-native-audio-preview-09-2025', name: 'Gemini 2.5 Flash Live (Preview)' }
 ];
 
 export const TOPICS = {
@@ -184,3 +188,80 @@ export const DSA_STAGES = INTERVIEW_PHASES[InterviewRound.DSA].map(p => ({
   timeSpent: 0,
   expectedDuration: p.duration || 0
 }));
+
+export const DSA_SCORING_DIMENSIONS = [
+  {
+    id: 'problem_solving',
+    name: 'Problem Solving',
+    weight: 0.25,
+    criteria: [
+      'Asked clarifying questions',
+      'Discussed multiple approaches',
+      'Analyzed time/space complexity',
+      'Chose optimal approach with justification'
+    ]
+  },
+  {
+    id: 'coding',
+    name: 'Coding',
+    weight: 0.25,
+    criteria: [
+      'Clean, readable code',
+      'Good variable naming',
+      'Correct implementation',
+      'Handled edge cases',
+      'No bugs or fixed bugs quickly'
+    ]
+  },
+  {
+    id: 'verification',
+    name: 'Verification',
+    weight: 0.25,
+    criteria: [
+      'Proactively tested without prompting',
+      'Tested with examples',
+      'Tested edge cases',
+      'Found and fixed bugs independently',
+      'Verified complexity'
+    ]
+  },
+  {
+    id: 'communication',
+    name: 'Communication',
+    weight: 0.25,
+    criteria: [
+      'Thought out loud while coding',
+      'Explained decisions clearly',
+      'Listened to hints',
+      'Collaborative approach',
+      'No prolonged silences'
+    ]
+  }
+];
+
+export const SYSTEM_DESIGN_SCORING_DIMENSIONS = [
+    {
+        id: 'depth',
+        name: 'Depth of Analysis',
+        weight: 0.25,
+        criteria: ['Identified core challenges', 'Detailed component design', 'Considered scale']
+    },
+    {
+        id: 'clarity',
+        name: 'Communication Clarity',
+        weight: 0.25,
+        criteria: ['Structured approach', 'Clear explanations', 'Effective diagramming']
+    },
+    {
+        id: 'technical',
+        name: 'Technical Accuracy',
+        weight: 0.25,
+        criteria: ['Correct technology choices', 'Understanding of tradeoffs', 'Reasonable constraints']
+    },
+    {
+        id: 'practical',
+        name: 'Practicality',
+        weight: 0.25,
+        criteria: ['Feasible design', 'Addressed bottlenecks', 'Real-world considerations']
+    }
+];

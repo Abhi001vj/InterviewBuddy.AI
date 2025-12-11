@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
-import { Square, Circle, Minus, Eraser, Trash2, ArrowRight, Type } from 'lucide-react';
+import { Square, Circle, Minus, Eraser, Trash2, ArrowRight, Type, User } from 'lucide-react';
 import { DrawingShape } from '../types';
 
 interface WhiteboardProps {
@@ -9,16 +9,18 @@ interface WhiteboardProps {
 
 export interface WhiteboardRef {
   getSnapshot: () => Promise<string>;
+  getVersion: () => number;
 }
 
 const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [shapes, setShapes] = useState<DrawingShape[]>([]);
-  const [currentTool, setCurrentTool] = useState<'rect' | 'cylinder' | 'line' | 'arrow' | 'text' | 'eraser'>('rect');
+  const [currentTool, setCurrentTool] = useState<'rect' | 'cylinder' | 'line' | 'arrow' | 'text' | 'eraser' | 'actor'>('rect');
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [currentShape, setCurrentShape] = useState<DrawingShape | null>(null);
   const [textInput, setTextInput] = useState<{ x: number, y: number, value: string } | null>(null);
+  const versionRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     getSnapshot: async () => {
@@ -37,7 +39,8 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
           reader.readAsDataURL(blob);
         }, 'image/jpeg', 0.8);
       });
-    }
+    },
+    getVersion: () => versionRef.current
   }));
 
   const drawShape = (ctx: CanvasRenderingContext2D, shape: DrawingShape) => {
@@ -92,6 +95,44 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
         ctx.font = '12px sans-serif';
         ctx.fillText('DB', shape.x + w/2 - 10, shape.y + h/2);
       }
+    } else if (shape.type === 'actor') {
+         // Draw a stick figure or user icon
+         const w = 40;
+         const h = 50;
+         const cx = shape.x + w/2;
+         const cy = shape.y;
+         
+         // Head
+         ctx.beginPath();
+         ctx.arc(cx, cy + 10, 10, 0, Math.PI * 2);
+         ctx.fillStyle = '#1e293b';
+         ctx.fill();
+         ctx.stroke();
+         
+         // Body
+         ctx.beginPath();
+         ctx.moveTo(cx, cy + 20);
+         ctx.lineTo(cx, cy + 35);
+         ctx.stroke();
+         
+         // Arms
+         ctx.beginPath();
+         ctx.moveTo(cx - 10, cy + 25);
+         ctx.lineTo(cx + 10, cy + 25);
+         ctx.stroke();
+         
+         // Legs
+         ctx.beginPath();
+         ctx.moveTo(cx, cy + 35);
+         ctx.lineTo(cx - 10, cy + 50);
+         ctx.moveTo(cx, cy + 35);
+         ctx.lineTo(cx + 10, cy + 50);
+         ctx.stroke();
+         
+         ctx.fillStyle = '#cbd5e1';
+         ctx.font = '12px sans-serif';
+         ctx.fillText('User', shape.x, shape.y + 60);
+
     } else if (shape.type === 'line' || shape.type === 'arrow') {
       if (shape.endX !== undefined && shape.endY !== undefined) {
         ctx.moveTo(shape.x, shape.y);
@@ -214,6 +255,7 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
       
       setShapes([...shapes, finalShape]);
       setCurrentShape(null);
+      versionRef.current += 1;
       onCanvasUpdate();
     }
   };
@@ -231,20 +273,36 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
                 // Approximate text bounds
                 return !(x >= s.x && x <= s.x + 100 && y >= s.y && y <= s.y + 20);
             }
+            if (s.type === 'actor') {
+                return !(x >= s.x && x <= s.x + 40 && y >= s.y && y <= s.y + 60);
+            }
             return !(x >= s.x && x <= s.x + (s.width || 0) && y >= s.y && y <= s.y + (s.height || 0));
         });
         if (newShapes.length !== shapes.length) {
             setShapes(newShapes);
+            versionRef.current += 1;
             onCanvasUpdate();
         }
       } else if (currentTool === 'text') {
           if (!textInput) {
               setTextInput({ x, y, value: '' });
           } else {
-              // Clicked elsewhere while typing? Commit current text
               handleTextSubmit();
-              setTextInput({ x, y, value: '' }); // Start new? Or just move? Let's just start new at new pos
+              setTextInput({ x, y, value: '' });
           }
+      } else if (currentTool === 'actor') {
+          const newShape: DrawingShape = {
+              id: Date.now().toString(),
+              type: 'actor',
+              x: x - 20,
+              y: y - 25,
+              width: 40, 
+              height: 50,
+              color: '#94a3b8'
+          };
+          setShapes([...shapes, newShape]);
+          versionRef.current += 1;
+          onCanvasUpdate();
       }
   };
 
@@ -259,12 +317,12 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
               color: '#fff'
           };
           setShapes([...shapes, newShape]);
+          versionRef.current += 1;
           onCanvasUpdate();
       }
       setTextInput(null);
   };
 
-  // Drag and Drop Logic
   const handleDragStart = (e: React.DragEvent, tool: string) => {
       e.dataTransfer.setData('tool', tool);
   };
@@ -272,7 +330,7 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
   const handleDrop = (e: React.DragEvent) => {
       e.preventDefault();
       const tool = e.dataTransfer.getData('tool');
-      if (tool && (tool === 'rect' || tool === 'cylinder')) {
+      if (tool && (tool === 'rect' || tool === 'cylinder' || tool === 'actor')) {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
         const x = e.clientX - rect.left;
@@ -283,11 +341,12 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
             type: tool as any,
             x: x - 50, // Center it roughly
             y: y - 30,
-            width: 100,
-            height: 60,
+            width: tool === 'actor' ? 40 : 100,
+            height: tool === 'actor' ? 50 : 60,
             color: '#94a3b8'
         };
         setShapes([...shapes, newShape]);
+        versionRef.current += 1;
         onCanvasUpdate();
       }
   };
@@ -299,61 +358,71 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
   return (
     <div className="relative w-full h-full bg-slate-900 overflow-hidden flex flex-col">
       {/* Toolbar */}
-      <div className="absolute top-4 left-4 flex gap-2 bg-slate-800 p-2 rounded-lg shadow-lg z-10 border border-slate-700">
+      <div className="absolute top-4 left-4 flex gap-1 bg-slate-800 p-1.5 rounded-lg shadow-xl z-10 border border-slate-700">
         <button 
           draggable
           onDragStart={(e) => handleDragStart(e, 'rect')}
           onClick={() => setCurrentTool('rect')}
-          className={`p-2 rounded ${currentTool === 'rect' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white cursor-grab active:cursor-grabbing'}`}
-          title="Service (Rectangle) - Drag to board"
+          className={`p-2 rounded-md transition-colors ${currentTool === 'rect' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+          title="Service (Rectangle)"
         >
-          <Square size={20} />
+          <Square size={18} />
         </button>
         <button 
           draggable
           onDragStart={(e) => handleDragStart(e, 'cylinder')}
           onClick={() => setCurrentTool('cylinder')}
-          className={`p-2 rounded ${currentTool === 'cylinder' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white cursor-grab active:cursor-grabbing'}`}
-          title="Database (Cylinder) - Drag to board"
+          className={`p-2 rounded-md transition-colors ${currentTool === 'cylinder' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+          title="Database (Cylinder)"
         >
-          <Circle size={20} />
+          <Circle size={18} />
+        </button>
+        <button 
+          draggable
+          onDragStart={(e) => handleDragStart(e, 'actor')}
+          onClick={() => setCurrentTool('actor')}
+          className={`p-2 rounded-md transition-colors ${currentTool === 'actor' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+          title="User / Actor"
+        >
+          <User size={18} />
+        </button>
+        <div className="w-px bg-slate-700 mx-1 my-1"></div>
+        <button 
+          onClick={() => setCurrentTool('arrow')}
+          className={`p-2 rounded-md transition-colors ${currentTool === 'arrow' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+          title="Arrow Connection"
+        >
+          <ArrowRight size={18} className="-rotate-45" />
         </button>
         <button 
           onClick={() => setCurrentTool('line')}
-          className={`p-2 rounded ${currentTool === 'line' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-          title="Connection (Line)"
+          className={`p-2 rounded-md transition-colors ${currentTool === 'line' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+          title="Line Connection"
         >
-          <Minus size={20} className="rotate-45" />
-        </button>
-        <button 
-          onClick={() => setCurrentTool('arrow')}
-          className={`p-2 rounded ${currentTool === 'arrow' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-          title="Directional Connection (Arrow)"
-        >
-          <ArrowRight size={20} className="-rotate-45" />
+          <Minus size={18} className="rotate-45" />
         </button>
         <button 
           onClick={() => setCurrentTool('text')}
-          className={`p-2 rounded ${currentTool === 'text' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+          className={`p-2 rounded-md transition-colors ${currentTool === 'text' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
           title="Text Label"
         >
-          <Type size={20} />
+          <Type size={18} />
         </button>
         
-         <button 
-          onClick={() => setCurrentTool('eraser')}
-          className={`p-2 rounded ${currentTool === 'eraser' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}
-          title="Eraser (Click object to delete)"
-        >
-          <Eraser size={20} />
-        </button>
-        <div className="w-px bg-slate-700 mx-1"></div>
+        <div className="w-px bg-slate-700 mx-1 my-1"></div>
         <button 
-          onClick={() => { setShapes([]); onCanvasUpdate(); }}
-          className="p-2 rounded text-slate-400 hover:text-red-400"
+          onClick={() => setCurrentTool('eraser')}
+          className={`p-2 rounded-md transition-colors ${currentTool === 'eraser' ? 'bg-red-900/50 text-red-200 shadow-sm border border-red-900' : 'text-slate-400 hover:text-red-300 hover:bg-slate-700'}`}
+          title="Eraser"
+        >
+          <Eraser size={18} />
+        </button>
+        <button 
+          onClick={() => { setShapes([]); versionRef.current += 1; onCanvasUpdate(); }}
+          className="p-2 rounded-md text-slate-400 hover:text-red-400 hover:bg-slate-700 transition-colors"
           title="Clear Board"
         >
-          <Trash2 size={20} />
+          <Trash2 size={18} />
         </button>
       </div>
       
@@ -371,11 +440,10 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
           className="absolute inset-0"
         />
         
-        {/* Text Input Overlay */}
         {textInput && (
             <input
                 autoFocus
-                className="absolute bg-slate-800 text-white border border-blue-500 rounded px-2 py-1 text-sm outline-none shadow-lg"
+                className="absolute bg-slate-800 text-white border border-blue-500 rounded px-2 py-1 text-sm outline-none shadow-lg z-20"
                 style={{ left: textInput.x, top: textInput.y }}
                 value={textInput.value}
                 onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
@@ -388,10 +456,9 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
             />
         )}
 
-        {/* Helper text for empty state */}
         {shapes.length === 0 && !isDrawing && !textInput && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20 text-slate-400 select-none">
-                <span className="text-4xl font-bold">System Design Whiteboard</span>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10 text-slate-400 select-none">
+                <span className="text-4xl font-bold tracking-tight">System Design Canvas</span>
             </div>
         )}
       </div>
