@@ -1,10 +1,11 @@
 import React from 'react';
-import { AssessmentResult } from '../types';
+import { AssessmentResult, InterviewRound } from '../types';
 import { Target, Zap, BookOpen, Code, Clock } from 'lucide-react';
 
 interface MetricsDashboardProps {
   scores: AssessmentResult['quality_scores'];
   timeData: { spent: number; expected: number | null; label: string };
+  roundType: InterviewRound;
 }
 
 const MetricBar = ({ label, score, color }: { label: string, score: number, color: string }) => (
@@ -22,7 +23,7 @@ const MetricBar = ({ label, score, color }: { label: string, score: number, colo
   </div>
 );
 
-const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ scores, timeData }) => {
+const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ scores, timeData, roundType }) => {
   return (
     <div className="p-6 space-y-6 bg-slate-900/50">
       

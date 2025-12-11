@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { InterviewPhase, AssessmentResult, RealTimeFeedback } from '../types';
+import { InterviewPhase, AssessmentResult, RealTimeFeedback, InterviewRound } from '../types';
 import { Clock, Target, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 import Timeline from './Timeline';
 
@@ -11,6 +10,7 @@ interface InterviewHUDProps {
   onPhaseClick: (phaseId: string) => void;
   feedbacks: RealTimeFeedback[];
   scores: AssessmentResult['quality_scores'];
+  roundType: InterviewRound;
 }
 
 const InterviewHUD: React.FC<InterviewHUDProps> = ({ 
@@ -19,7 +19,8 @@ const InterviewHUD: React.FC<InterviewHUDProps> = ({
   timeSpent, 
   onPhaseClick,
   feedbacks,
-  scores
+  scores,
+  roundType
 }) => {
   const latestFeedback = feedbacks.length > 0 ? feedbacks[feedbacks.length - 1] : null;
   const currentPhase = phases.length > 0 ? phases[currentPhaseIndex] : null;

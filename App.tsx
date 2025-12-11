@@ -25,8 +25,8 @@ const INITIAL_CONFIG: InterviewConfig = {
   topic: TOPICS[InterviewRound.SYSTEM_DESIGN][0],
   customQuestion: '',
   language: ProgrammingLanguage.PYTHON,
-  textModel: TEXT_MODELS[0].id,
-  liveModel: LIVE_MODELS[0].id
+  textModel: 'gemini-3-pro-preview',
+  liveModel: 'gemini-2.5-flash-native-audio-preview-09-2025'
 };
 
 function App() {
@@ -357,6 +357,7 @@ function App() {
                 feedback={dsaFeedback}
                 language={interviewConfig.language}
                 onLanguageChange={handleLanguageChange}
+                problemDescription={question || interviewConfig.customQuestion || interviewConfig.topic}
              />
           </div>
           

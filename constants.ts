@@ -7,7 +7,7 @@ export const ROUNDS = Object.values(InterviewRound);
 export const LANGUAGES = Object.values(ProgrammingLanguage);
 
 export const TEXT_MODELS = [
-  { id: 'gemini-2.0-flash-thinking-exp-01-21', name: 'Gemini 2.0 Flash Thinking (Reasoning)' },
+  { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro (Thinking)' },
   { id: 'gemini-2.0-pro-exp-02-05', name: 'Gemini 2.0 Pro (Complex Tasks)' },
   { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Fast)' },
   { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
@@ -15,8 +15,8 @@ export const TEXT_MODELS = [
 ];
 
 export const LIVE_MODELS = [
-  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Live' },
-  { id: 'gemini-2.5-flash-native-audio-preview-09-2025', name: 'Gemini 2.5 Flash Live (Preview)' }
+  { id: 'gemini-2.5-flash-native-audio-preview-09-2025', name: 'Gemini 2.5 Flash Live (Preview)' },
+  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Live' }
 ];
 
 export const TOPICS = {
