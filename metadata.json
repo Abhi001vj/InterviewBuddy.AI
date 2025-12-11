@@ -1,0 +1,7 @@
+{
+  "name": "InterviewBuddy.AI",
+  "description": "A real-time AI interview simulator for FAANG/MAANG roles, featuring a collaborative whiteboard, code editor, and live voice interaction powered by Gemini 2.5.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
