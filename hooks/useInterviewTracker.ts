@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { InterviewPhase, InterviewRound, AssessmentResult, RealTimeFeedback } from '../types';
-import { INTERVIEW_PHASES } from '../constants';
+import { InterviewPhase, InterviewRound, AssessmentResult, RealTimeFeedback, TargetRole } from '../types';
+import { getInterviewPhases } from '../constants';
 import { assessInterviewProgress } from '../services/gemini';
 import { WhiteboardRef } from '../components/Whiteboard';
 
 interface UseInterviewTrackerProps {
   roundType: InterviewRound;
+  targetRole: TargetRole;
   transcript: { role: string, text: string }[];
   whiteboardRef: React.RefObject<WhiteboardRef>;
   code: string;
@@ -17,6 +18,7 @@ interface UseInterviewTrackerProps {
 
 export const useInterviewTracker = ({
   roundType,
+  targetRole,
   transcript,
   whiteboardRef,
   code,
@@ -37,13 +39,13 @@ export const useInterviewTracker = ({
   const assessTimerRef = useRef<number | null>(null);
   const lastTranscriptLengthRef = useRef(0);
 
-  // Initialize phases based on round type
+  // Initialize phases based on round type AND role
   useEffect(() => {
-    const config = INTERVIEW_PHASES[roundType];
+    const config = getInterviewPhases(roundType, targetRole);
     setPhases(config);
     setCurrentPhaseIndex(0);
     setTimeSpent(config.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {}));
-  }, [roundType]);
+  }, [roundType, targetRole]);
 
   // Main Timer
   useEffect(() => {

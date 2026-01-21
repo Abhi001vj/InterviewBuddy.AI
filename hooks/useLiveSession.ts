@@ -30,7 +30,7 @@ interface UseLiveSessionProps {
   systemInstruction: string;
   onToolCall?: (toolCalls: any[]) => Promise<any[]>;
   model: string;
-  shouldSendVisual?: () => boolean; // New callback to check if we should send
+  shouldSendVisual?: () => boolean;
 }
 
 export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemInstruction, onToolCall, model, shouldSendVisual }: UseLiveSessionProps) => {
@@ -38,6 +38,7 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<{role: string, text: string}[]>([]);
+  const [isMicPermissionDenied, setIsMicPermissionDenied] = useState(false);
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -58,9 +59,27 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
     }
   }, []);
 
+  const sendTextMessage = (text: string) => {
+    if (sessionPromiseRef.current) {
+      sessionPromiseRef.current.then(session => {
+        if (session.send) {
+           session.send({
+             clientContent: {
+               turns: [{ role: 'user', parts: [{ text }] }],
+               turnComplete: true
+             }
+           });
+           onTranscriptUpdate('user', text); // Optimistic update
+        }
+      }).catch(e => console.error("Failed to send text:", e));
+    }
+  };
+
   const connect = async () => {
     setError(null);
-    setTranscript([]); // Clear previous transcript
+    setTranscript([]);
+    setIsMicPermissionDenied(false);
+
     if (!process.env.API_KEY) {
       setError("API Key is missing.");
       return;
@@ -69,39 +88,20 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      // Setup Audio Input
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      
-      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: INPUT_SAMPLE_RATE });
-      inputAudioContextRef.current = inputCtx;
-      
-      const source = inputCtx.createMediaStreamSource(stream);
-      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-      
-      processor.onaudioprocess = (e) => {
-        try {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const pcmBlob = createPcmBlob(inputData);
-            
-            if (sessionPromiseRef.current) {
-              sessionPromiseRef.current.then(session => {
-                 if (session && session.sendRealtimeInput) {
-                    session.sendRealtimeInput({ media: pcmBlob });
-                 }
-              }).catch(err => {
-                 // Ignore during connect
-              });
-            }
-        } catch (e) {
-            // Ignore processing errors
-        }
-      };
-      
-      source.connect(processor);
-      processor.connect(inputCtx.destination);
+      // Setup Audio Input (Attempt)
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        
+        const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: INPUT_SAMPLE_RATE });
+        inputAudioContextRef.current = inputCtx;
+      } catch (micErr) {
+        console.warn("Microphone access denied or failed:", micErr);
+        setIsMicPermissionDenied(true);
+        // Do not block connection; proceed to connect without audio input
+      }
 
-      // Setup Audio Output
+      // Setup Audio Output (Always attempt)
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       audioContextRef.current = outputCtx;
       
@@ -120,7 +120,7 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
             speechConfig: {
                 voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
             },
-            inputAudioTranscription: {},
+            inputAudioTranscription: {}, // Still requested, but won't generate if no audio sent
             outputAudioTranscription: {},
             tools: [{ functionDeclarations: [updateStageTool] }]
         },
@@ -129,13 +129,35 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
             console.log("Live Session Connected");
             setIsConnected(true);
             
-            // Start Optimized Visual Streaming Loop
+            // Start Audio Stream Input ONLY if mic was granted
+            if (streamRef.current && inputAudioContextRef.current) {
+                const inputCtx = inputAudioContextRef.current;
+                const source = inputCtx.createMediaStreamSource(streamRef.current);
+                const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+                
+                processor.onaudioprocess = (e) => {
+                    try {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const pcmBlob = createPcmBlob(inputData);
+                        
+                        if (sessionPromiseRef.current) {
+                        sessionPromiseRef.current.then(session => {
+                            if (session && session.sendRealtimeInput) {
+                                session.sendRealtimeInput({ media: pcmBlob });
+                            }
+                        }).catch(err => {});
+                        }
+                    } catch (e) { }
+                };
+                
+                source.connect(processor);
+                processor.connect(inputCtx.destination);
+            }
+
+            // Start Visual Streaming Loop
             visualIntervalRef.current = window.setInterval(async () => {
                  try {
-                     // Only send if explicit change detected (if callback provided)
-                     if (shouldSendVisual && !shouldSendVisual()) {
-                         return;
-                     }
+                     if (shouldSendVisual && !shouldSendVisual()) return;
 
                      const context = await getVisualContext();
                      if (context && context.data && context.data.length > 100 && sessionPromiseRef.current) {
@@ -187,6 +209,8 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
             if (msg.serverContent?.outputTranscription?.text) {
                 setTranscript(prev => [...prev, { role: 'model', text: msg.serverContent?.outputTranscription?.text || '' }]);
             }
+            // Logic for inputTranscription is less relevant if we are sending text manually, 
+            // but we keep it for when mic IS used.
             if (msg.serverContent?.inputTranscription?.text) {
                 setTranscript(prev => [...prev, { role: 'user', text: msg.serverContent?.inputTranscription?.text || '' }]);
             }
@@ -230,6 +254,7 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
   const disconnect = () => {
     setIsConnected(false);
     setIsSpeaking(false);
+    setIsMicPermissionDenied(false);
     
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
@@ -262,5 +287,5 @@ export const useLiveSession = ({ onTranscriptUpdate, getVisualContext, systemIns
     }
   };
 
-  return { connect, disconnect, isConnected, isSpeaking, error, transcript };
+  return { connect, disconnect, isConnected, isSpeaking, error, transcript, sendTextMessage, isMicPermissionDenied };
 };

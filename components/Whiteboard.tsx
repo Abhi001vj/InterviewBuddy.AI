@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
-import { Square, Circle, Minus, Eraser, Trash2, ArrowRight, Type, User } from 'lucide-react';
+import { Square, Circle, Minus, Eraser, Trash2, ArrowRight, Type, User, MousePointer2 } from 'lucide-react';
 import { DrawingShape } from '../types';
 
 interface WhiteboardProps {
@@ -15,11 +15,17 @@ export interface WhiteboardRef {
 const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [shapes, setShapes] = useState<DrawingShape[]>([]);
-  const [currentTool, setCurrentTool] = useState<'rect' | 'cylinder' | 'line' | 'arrow' | 'text' | 'eraser' | 'actor'>('rect');
+  const [currentTool, setCurrentTool] = useState<'select' | 'rect' | 'cylinder' | 'line' | 'arrow' | 'text' | 'eraser' | 'actor'>('select');
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [currentShape, setCurrentShape] = useState<DrawingShape | null>(null);
-  const [textInput, setTextInput] = useState<{ x: number, y: number, value: string } | null>(null);
+  const [textInput, setTextInput] = useState<{ x: number, y: number, value: string, editingShapeId?: string } | null>(null);
+  
+  // Selection & Dragging State
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  
   const versionRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
@@ -43,20 +49,33 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
     getVersion: () => versionRef.current
   }));
 
-  const drawShape = (ctx: CanvasRenderingContext2D, shape: DrawingShape) => {
+  const drawShape = (ctx: CanvasRenderingContext2D, shape: DrawingShape, isSelected: boolean = false) => {
     ctx.beginPath();
-    ctx.strokeStyle = shape.color;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = isSelected ? '#3b82f6' : shape.color; // Blue if selected
+    ctx.lineWidth = isSelected ? 3 : 2;
     ctx.fillStyle = '#1e293b'; // slate-800
+
+    if (isSelected) {
+        ctx.setLineDash([5, 5]);
+    } else {
+        ctx.setLineDash([]);
+    }
+
+    // Determine if we should draw the text (skip if currently editing this shape's text)
+    const shouldDrawText = !textInput?.editingShapeId || textInput.editingShapeId !== shape.id;
 
     if (shape.type === 'rect') {
       if (shape.width && shape.height) {
         ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
         ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
-        // Label
-        ctx.fillStyle = '#cbd5e1';
-        ctx.font = '12px sans-serif';
-        ctx.fillText('Service', shape.x + 5, shape.y + 15);
+        
+        if (shouldDrawText) {
+            ctx.setLineDash([]); 
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '12px sans-serif';
+            const label = shape.text || 'Service';
+            ctx.fillText(label, shape.x + 5, shape.y + 15);
+        }
       }
     } else if (shape.type === 'cylinder') {
       if (shape.width && shape.height) {
@@ -90,10 +109,13 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
         ctx.ellipse(shape.x + w/2, shape.y + h, w/2, w/4, 0, 0, Math.PI);
         ctx.stroke();
         
-         // Label
-        ctx.fillStyle = '#cbd5e1';
-        ctx.font = '12px sans-serif';
-        ctx.fillText('DB', shape.x + w/2 - 10, shape.y + h/2);
+        if (shouldDrawText) {
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '12px sans-serif';
+            const label = shape.text || 'DB';
+            ctx.fillText(label, shape.x + w/2 - 10, shape.y + h/2);
+        }
       }
     } else if (shape.type === 'actor') {
          // Draw a stick figure or user icon
@@ -129,9 +151,13 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
          ctx.lineTo(cx + 10, cy + 50);
          ctx.stroke();
          
-         ctx.fillStyle = '#cbd5e1';
-         ctx.font = '12px sans-serif';
-         ctx.fillText('User', shape.x, shape.y + 60);
+         if (shouldDrawText) {
+             ctx.setLineDash([]);
+             ctx.fillStyle = '#cbd5e1';
+             ctx.font = '12px sans-serif';
+             const label = shape.text || 'User';
+             ctx.fillText(label, shape.x, shape.y + 60);
+         }
 
     } else if (shape.type === 'line' || shape.type === 'arrow') {
       if (shape.endX !== undefined && shape.endY !== undefined) {
@@ -154,13 +180,23 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
         }
       }
     } else if (shape.type === 'text') {
-        if (shape.text) {
+        if (shape.text && shouldDrawText) {
+            ctx.setLineDash([]);
             ctx.fillStyle = '#fff';
             ctx.font = '16px sans-serif';
             ctx.textBaseline = 'top';
             ctx.fillText(shape.text, shape.x, shape.y);
+            
+            if (isSelected) {
+                const metrics = ctx.measureText(shape.text);
+                ctx.strokeStyle = '#3b82f6';
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(shape.x - 4, shape.y - 4, metrics.width + 8, 24);
+            }
         }
     }
+    // Reset Dash
+    ctx.setLineDash([]);
   };
 
   const renderCanvas = () => {
@@ -182,8 +218,8 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
     }
 
-    shapes.forEach(shape => drawShape(ctx, shape));
-    if (currentShape) drawShape(ctx, currentShape);
+    shapes.forEach(shape => drawShape(ctx, shape, shape.id === selectedShapeId));
+    if (currentShape) drawShape(ctx, currentShape, false);
   };
 
   useEffect(() => {
@@ -195,17 +231,72 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
       canvas.height = parent.clientHeight;
     }
     renderCanvas();
-  }, [shapes, currentShape]);
+  }, [shapes, currentShape, selectedShapeId, textInput]);
+
+  const hitTest = (x: number, y: number): DrawingShape | null => {
+      // Check in reverse order (top to bottom)
+      for (let i = shapes.length - 1; i >= 0; i--) {
+          const s = shapes[i];
+          if (s.type === 'rect' || s.type === 'cylinder') {
+              if (x >= s.x && x <= s.x + (s.width || 0) && y >= s.y && y <= s.y + (s.height || 0)) {
+                  return s;
+              }
+          } else if (s.type === 'actor') {
+               if (x >= s.x && x <= s.x + 40 && y >= s.y && y <= s.y + 60) return s;
+          } else if (s.type === 'text' && s.text) {
+               // Approximate text hit box
+               if (x >= s.x && x <= s.x + (s.text.length * 10) && y >= s.y && y <= s.y + 20) return s;
+          } else if ((s.type === 'line' || s.type === 'arrow') && s.endX !== undefined && s.endY !== undefined) {
+               // Distance to segment
+               const A = x - s.x;
+               const B = y - s.y;
+               const C = s.endX - s.x;
+               const D = s.endY - s.y;
+               const dot = A * C + B * D;
+               const len_sq = C * C + D * D;
+               let param = -1;
+               if (len_sq !== 0) param = dot / len_sq;
+               let xx, yy;
+               if (param < 0) { xx = s.x; yy = s.y; }
+               else if (param > 1) { xx = s.endX; yy = s.endY; }
+               else { xx = s.x + param * C; yy = s.y + param * D; }
+               const dx = x - xx;
+               const dy = y - yy;
+               if ((dx * dx + dy * dy) < 100) return s; // 10px buffer
+          }
+      }
+      return null;
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (currentTool === 'eraser' || currentTool === 'text') return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
+
+    if (currentTool === 'select') {
+        const hit = hitTest(x, y);
+        if (hit) {
+            setSelectedShapeId(hit.id);
+            setIsDragging(true);
+            setDragOffset({ x: x - hit.x, y: y - hit.y });
+        } else {
+            setSelectedShapeId(null);
+        }
+        return;
+    }
+
+    if (currentTool === 'eraser') {
+        // Handled in click usually, but can be drag-to-erase? Keep click for now.
+        return;
+    }
+
+    if (currentTool === 'text') return; // Handled in click
+
+    // Start Drawing
     setStartPos({ x, y });
     setIsDrawing(true);
+    setSelectedShapeId(null);
     
     const newShape: DrawingShape = {
       id: Date.now().toString(),
@@ -219,11 +310,31 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || !currentShape) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    if (currentTool === 'select' && isDragging && selectedShapeId) {
+        setShapes(prev => prev.map(s => {
+            if (s.id === selectedShapeId) {
+                const newX = x - dragOffset.x;
+                const newY = y - dragOffset.y;
+                const dx = newX - s.x;
+                const dy = newY - s.y;
+                
+                // For lines, move endpoints too
+                if ((s.type === 'line' || s.type === 'arrow') && s.endX !== undefined && s.endY !== undefined) {
+                    return { ...s, x: newX, y: newY, endX: s.endX + dx, endY: s.endY + dy };
+                }
+                return { ...s, x: newX, y: newY };
+            }
+            return s;
+        }));
+        return;
+    }
+
+    if (!isDrawing || !currentShape) return;
 
     if (currentTool === 'line' || currentTool === 'arrow') {
       setCurrentShape({ ...currentShape, endX: x, endY: y });
@@ -237,6 +348,13 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
   };
 
   const handleMouseUp = () => {
+    if (isDragging) {
+        setIsDragging(false);
+        versionRef.current += 1;
+        onCanvasUpdate();
+        return;
+    }
+
     if (!isDrawing) return;
     setIsDrawing(false);
     if (currentShape) {
@@ -251,6 +369,11 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
             finalShape.y += finalShape.height;
             finalShape.height = Math.abs(finalShape.height);
         }
+        // Minimal size check
+        if ((Math.abs(finalShape.width || 0) < 5) && (Math.abs(finalShape.height || 0) < 5)) {
+            setCurrentShape(null);
+            return; 
+        }
       }
       
       setShapes([...shapes, finalShape]);
@@ -261,25 +384,17 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
   };
 
   const handleClick = (e: React.MouseEvent) => {
+      if (isDragging) return; // Don't trigger click events if we just dragged
+      
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
       if (currentTool === 'eraser') {
-        const newShapes = shapes.filter(s => {
-            if (s.type === 'line' || s.type === 'arrow') return true; 
-            if (s.type === 'text') {
-                // Approximate text bounds
-                return !(x >= s.x && x <= s.x + 100 && y >= s.y && y <= s.y + 20);
-            }
-            if (s.type === 'actor') {
-                return !(x >= s.x && x <= s.x + 40 && y >= s.y && y <= s.y + 60);
-            }
-            return !(x >= s.x && x <= s.x + (s.width || 0) && y >= s.y && y <= s.y + (s.height || 0));
-        });
-        if (newShapes.length !== shapes.length) {
-            setShapes(newShapes);
+        const hit = hitTest(x, y);
+        if (hit) {
+            setShapes(shapes.filter(s => s.id !== hit.id));
             versionRef.current += 1;
             onCanvasUpdate();
         }
@@ -306,17 +421,50 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
       }
   };
 
+  const handleDoubleClick = (e: React.MouseEvent) => {
+      if (currentTool !== 'select') return;
+      
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const hit = hitTest(x, y);
+      if (hit) {
+          // Open text edit for this shape
+          let initialText = hit.text || '';
+          if (!initialText) {
+             if (hit.type === 'rect') initialText = 'Service';
+             if (hit.type === 'cylinder') initialText = 'DB';
+             if (hit.type === 'actor') initialText = 'User';
+          }
+          
+          setTextInput({
+              x: hit.x,
+              y: hit.y, // adjust for visual alignment?
+              value: initialText,
+              editingShapeId: hit.id
+          });
+      }
+  };
+
   const handleTextSubmit = () => {
       if (textInput && textInput.value.trim()) {
-          const newShape: DrawingShape = {
-              id: Date.now().toString(),
-              type: 'text',
-              x: textInput.x,
-              y: textInput.y,
-              text: textInput.value,
-              color: '#fff'
-          };
-          setShapes([...shapes, newShape]);
+          if (textInput.editingShapeId) {
+              // Update existing shape text
+              setShapes(prev => prev.map(s => s.id === textInput.editingShapeId ? { ...s, text: textInput.value } : s));
+          } else {
+              // Create new text shape
+              const newShape: DrawingShape = {
+                  id: Date.now().toString(),
+                  type: 'text',
+                  x: textInput.x,
+                  y: textInput.y,
+                  text: textInput.value,
+                  color: '#fff'
+              };
+              setShapes([...shapes, newShape]);
+          }
           versionRef.current += 1;
           onCanvasUpdate();
       }
@@ -359,6 +507,14 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
     <div className="relative w-full h-full bg-slate-900 overflow-hidden flex flex-col">
       {/* Toolbar */}
       <div className="absolute top-4 left-4 flex gap-1 bg-slate-800 p-1.5 rounded-lg shadow-xl z-10 border border-slate-700">
+        <button 
+          onClick={() => { setCurrentTool('select'); setSelectedShapeId(null); }}
+          className={`p-2 rounded-md transition-colors ${currentTool === 'select' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+          title="Select / Move"
+        >
+          <MousePointer2 size={18} />
+        </button>
+        <div className="w-px bg-slate-700 mx-1 my-1"></div>
         <button 
           draggable
           onDragStart={(e) => handleDragStart(e, 'rect')}
@@ -427,7 +583,7 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
       </div>
       
       <div 
-        className="flex-1 relative cursor-crosshair"
+        className={`flex-1 relative ${currentTool === 'select' ? 'cursor-default' : 'cursor-crosshair'}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
@@ -437,13 +593,14 @@ const Whiteboard = forwardRef<WhiteboardRef, WhiteboardProps>(({ onCanvasUpdate 
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
           className="absolute inset-0"
         />
         
         {textInput && (
             <input
                 autoFocus
-                className="absolute bg-slate-800 text-white border border-blue-500 rounded px-2 py-1 text-sm outline-none shadow-lg z-20"
+                className="absolute bg-slate-800 text-white border border-blue-500 rounded px-2 py-1 text-sm outline-none shadow-lg z-20 min-w-[100px]"
                 style={{ left: textInput.x, top: textInput.y }}
                 value={textInput.value}
                 onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}

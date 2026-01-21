@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { TestCase, TestResult, DSAChallenge, ProgrammingLanguage, FeedbackReport, AssessmentResult } from "../types";
 
@@ -11,6 +12,15 @@ const getAI = () => {
 // Helper to interpolate variables into prompts
 const interpolate = (template: string, variables: Record<string, any>) => {
   return template.replace(/{(\w+)}/g, (_, key) => variables[key] || `{${key}}`);
+};
+
+// Helper to sanitize JSON strings (remove markdown code blocks)
+const cleanJson = (text: string): string => {
+  if (!text) return "{}";
+  // Remove ```json and ``` wrap
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (match) return match[1];
+  return text;
 };
 
 export const rewriteQuestion = async (
@@ -66,6 +76,34 @@ export const selectBestQuestion = async (
   }
 };
 
+export const generateSolutionTemplate = async (
+  question: string,
+  language: string,
+  model: string
+): Promise<string> => {
+  const ai = getAI();
+  try {
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: `Generate the starter code (boilerplate) for the following coding problem in ${language}.
+      
+      Problem: "${question}"
+      
+      Requirements:
+      1. Include the class structure (e.g., class Solution).
+      2. Include the correct method signature for this specific problem.
+      3. DO NOT include the problem description or instructions in comments. Keep it clean.
+      4. DO NOT implement the solution. Just write 'pass' or return a dummy value.
+      
+      Output ONLY the code.`,
+    });
+    return response.text?.replace(/```\w*\n/g, '').replace(/```/g, '') || '';
+  } catch (error) {
+    console.error("Template Gen Error", error);
+    return `// Error generating template for ${language}`;
+  }
+};
+
 export const generateDSAChallenge = async (
   topicOrQuestion: string,
   language: ProgrammingLanguage = ProgrammingLanguage.PYTHON,
@@ -76,14 +114,14 @@ export const generateDSAChallenge = async (
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
-      starterCode: { type: Type.STRING, description: `Starter code in ${language} with class Solution and docstring description.` },
+      starterCode: { type: Type.STRING, description: `Clean starter code in ${language}. Class and method signature only.` },
       testCases: {
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
           properties: {
-            input: { type: Type.STRING },
-            output: { type: Type.STRING }
+            input: { type: Type.STRING, description: "Raw input values (e.g., '[1,2,3], 5')" },
+            output: { type: Type.STRING, description: "Expected output value (e.g., '[0, 2]')" }
           }
         }
       }
@@ -97,8 +135,11 @@ export const generateDSAChallenge = async (
       contents: `Create a LeetCode-style coding challenge for: "${topicOrQuestion}".
       
       1. Provide starter code in ${language} inside a 'class Solution'.
-      2. Include the full problem description, constraints, and examples as a comment/docstring inside the code.
-      3. Provide 3 distinct test cases (input and expected output).
+      2. The starter code MUST ONLY contain the class and method definition. 
+      3. DO NOT include the problem description, constraints, or examples in the comments. The user has a separate panel for that.
+      4. DO NOT implement the logic. The body should be empty, 'pass', or return null.
+      5. Provide 3 distinct test cases. 
+      IMPORTANT: For test case inputs, provide ONLY the raw values as they would be passed to the function, do not include variable names like 'nums ='.
       `,
       config: {
         responseMimeType: "application/json",
@@ -106,8 +147,7 @@ export const generateDSAChallenge = async (
       }
     });
 
-    const text = response.text;
-    if (!text) throw new Error("No response");
+    const text = cleanJson(response.text || "{}");
     return JSON.parse(text) as DSAChallenge;
   } catch (error) {
     console.error("DSA Gen Error", error);
@@ -124,7 +164,7 @@ export const analyzeCode = async (
   testCases: TestCase[],
   language: ProgrammingLanguage,
   model: string
-): Promise<{ passed: boolean, results: TestResult[], feedback: string }> => {
+): Promise<{ passed: boolean, results: TestResult[] }> => {
   const ai = getAI();
   
   const schema: Schema = {
@@ -143,15 +183,14 @@ export const analyzeCode = async (
             logs: { type: Type.STRING }
           }
         }
-      },
-      feedback: { type: Type.STRING }
+      }
     }
   };
 
   try {
     const response = await ai.models.generateContent({
       model: model,
-      contents: `Act as a ${language} code execution engine and judge. Analyze the following code against the provided test cases.
+      contents: `Act as a ${language} code execution engine. Execute the following code against the provided test cases.
       
       Problem: ${question}
       
@@ -162,9 +201,8 @@ export const analyzeCode = async (
       ${JSON.stringify(testCases)}
       
       1. Mentally execute the code for each test case.
-      2. Determine the actual output.
-      3. Specify if it passed or failed.
-      4. Provide brief feedback on time/space complexity and correctness.
+      2. Return the strict output for each case. 
+      3. DO NOT provide qualitative feedback here. Just the execution results.
       `,
       config: {
         responseMimeType: "application/json",
@@ -172,15 +210,13 @@ export const analyzeCode = async (
       }
     });
 
-    const text = response.text;
-    if (!text) throw new Error("No response");
+    const text = cleanJson(response.text || "{}");
     return JSON.parse(text);
   } catch (error) {
     console.error("Code Analysis Error", error);
     return {
       passed: false,
-      results: [],
-      feedback: "Error communicating with AI validation service."
+      results: []
     };
   }
 };
@@ -207,7 +243,19 @@ export const assessInterviewProgress = async (
       phase_completion: { type: Type.NUMBER },
       quality_scores: {
         type: Type.OBJECT,
-        nullable: true, 
+        nullable: true,
+        properties: {
+          // System Design Dimensions
+          depth: { type: Type.NUMBER, nullable: true },
+          clarity: { type: Type.NUMBER, nullable: true },
+          technical: { type: Type.NUMBER, nullable: true },
+          practical: { type: Type.NUMBER, nullable: true },
+          // DSA Dimensions
+          problem_solving: { type: Type.NUMBER, nullable: true },
+          coding: { type: Type.NUMBER, nullable: true },
+          verification: { type: Type.NUMBER, nullable: true },
+          communication: { type: Type.NUMBER, nullable: true }
+        }
       },
       red_flags: { type: Type.ARRAY, items: { type: Type.STRING } },
       green_flags: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -282,7 +330,8 @@ export const assessInterviewProgress = async (
       }
     });
 
-    return JSON.parse(response.text!) as AssessmentResult;
+    const text = cleanJson(response.text || "{}");
+    return JSON.parse(text) as AssessmentResult;
   } catch (error) {
     console.error("Assessment Error", error);
     return null;
@@ -354,7 +403,8 @@ export const generateDetailedFeedback = async (
       }
     });
     
-    return JSON.parse(response.text!) as FeedbackReport;
+    const text = cleanJson(response.text || "{}");
+    return JSON.parse(text) as FeedbackReport;
   } catch (error) {
     console.error("Feedback Gen Error", error);
     return null;

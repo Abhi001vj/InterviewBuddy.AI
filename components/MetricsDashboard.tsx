@@ -1,6 +1,8 @@
+
 import React from 'react';
 import { AssessmentResult, InterviewRound } from '../types';
-import { Target, Zap, BookOpen, Code, Clock } from 'lucide-react';
+import { Target, Clock } from 'lucide-react';
+import { SYSTEM_DESIGN_SCORING_DIMENSIONS, DSA_SCORING_DIMENSIONS } from '../constants';
 
 interface MetricsDashboardProps {
   scores: AssessmentResult['quality_scores'];
@@ -8,22 +10,25 @@ interface MetricsDashboardProps {
   roundType: InterviewRound;
 }
 
-const MetricBar = ({ label, score, color }: { label: string, score: number, color: string }) => (
+const MetricBar: React.FC<{ label: string; score: number; color: string }> = ({ label, score, color }) => (
   <div className="space-y-1">
     <div className="flex justify-between text-xs font-medium text-slate-400">
       <span>{label}</span>
-      <span>{score}/100</span>
+      <span>{score || 0}/100</span>
     </div>
     <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
       <div 
         className={`h-full rounded-full transition-all duration-1000 ease-out ${color}`} 
-        style={{ width: `${Math.max(5, score)}%` }}
+        style={{ width: `${Math.max(5, score || 0)}%` }}
       />
     </div>
   </div>
 );
 
 const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ scores, timeData, roundType }) => {
+  const dimensions = roundType === InterviewRound.DSA ? DSA_SCORING_DIMENSIONS : SYSTEM_DESIGN_SCORING_DIMENSIONS;
+  const colors = ['bg-purple-500', 'bg-blue-500', 'bg-green-500', 'bg-orange-500'];
+
   return (
     <div className="p-6 space-y-6 bg-slate-900/50">
       
@@ -60,26 +65,14 @@ const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ scores, timeData, r
           <Target size={14} /> Live Assessment
         </h3>
         
-        <MetricBar 
-          label="Depth of Analysis" 
-          score={scores.depth} 
-          color="bg-purple-500" 
-        />
-        <MetricBar 
-          label="Communication Clarity" 
-          score={scores.clarity} 
-          color="bg-blue-500" 
-        />
-        <MetricBar 
-          label="Technical Accuracy" 
-          score={scores.technical} 
-          color="bg-green-500" 
-        />
-        <MetricBar 
-          label="Practicality" 
-          score={scores.practical} 
-          color="bg-orange-500" 
-        />
+        {dimensions.map((dim, idx) => (
+          <MetricBar 
+            key={dim.id}
+            label={dim.name} 
+            score={scores[dim.id]} 
+            color={colors[idx % colors.length]} 
+          />
+        ))}
       </div>
 
       <div className="p-3 bg-slate-800/30 rounded-lg border border-slate-800 text-xs text-slate-500 leading-relaxed">

@@ -1,120 +1,60 @@
 
 export const ML_SYSTEM_DESIGN_RUBRIC = `
-ML SYSTEM DESIGN DELIVERY FRAMEWORK:
+ML SYSTEM DESIGN FRAMEWORK:
+1. Problem Framing: Clarify scope, business & ML objectives (Metrics).
+2. High-Level Design: Data flow from source to inference.
+3. Data & Features: Labeling strategies, feature engineering, embeddings.
+4. Modeling: Baseline vs SOTA, architecture choices, loss functions.
+5. Eval & Serving: Offline/Online metrics, latency, A/B testing.
+`;
 
-1. Problem Framing (5-7 mins)
-- Clarify the problem: Scope, constraints, scale.
-- Establish Business Objective: What is the value? (e.g., increase revenue, reduce harm).
-- Decide on ML Objective: Translate business goal to ML task (Ranking, Classification, etc.) and metric.
-* Green Flag: Asks detailed questions, defines clear objectives.
-* Red Flag: Jumps to solution, naive ML objective, ignores business value.
+export const BACKEND_SYSTEM_DESIGN_RUBRIC = `
+DISTRIBUTED SYSTEM DESIGN FRAMEWORK:
+1. Requirements: Functional (API capabilities) & Non-Functional (Scale, Latency, Consistency).
+2. API & Data Model: REST/RPC/GraphQL definitions, Schema (SQL vs NoSQL), Partitioning keys.
+3. High-Level Design: Load Balancers, Services, Caching layers, Message Queues.
+4. Deep Dive: Handling bottlenecks, Scaling (Horizontal vs Vertical), Database Sharding, Concurrency.
+5. Wrap-up: Failure scenarios, Monitoring, Trade-offs made.
+`;
 
-2. High-Level Design (2-3 mins)
-- Block diagram of inputs -> system -> outputs.
-- Key components (Data ingestion, Training, Inference, Action).
-* Green Flag: Covers full lifecycle.
-* Red Flag: Too much focus on generic SWE details (DB choice) instead of ML components.
-
-3. Data and Features (10 mins)
-- Training Data: Sources, labeling (supervised/semi-supervised), bias handling.
-- Features: Selection, hypothesis for predictive power, encodings (embeddings, one-hot).
-* Green Flag: Uses unsupervised data, strong feature hypothesis, discusses representation.
-* Red Flag: Laundry list of weak features, ignores representation.
-
-4. Modeling (10 mins)
-- Benchmark/Baseline: Simple heuristic or simple model first.
-- Model Selection: Tradeoffs between models (e.g., Logistic Regression vs. Two-Tower NN).
-- Architecture: Layers, activations, loss function details.
-* Green Flag: Starts simple, compares tradeoffs, understands architecture details.
-* Red Flag: Jumps to complex model without justification, hand-waves details.
-
-5. Inference and Evaluation (7 mins)
-- Evaluation: Offline (Precision/Recall, NDCG) vs Online (CTR, A/B Test). Ties back to business objective.
-- Inference: Latency, caching, distillation, scale.
-* Green Flag: Metrics tie to business, considers inference cost/latency.
-* Red Flag: Metrics disconnected from business, ignores inference constraints.
+export const FRONTEND_SYSTEM_DESIGN_RUBRIC = `
+FRONTEND SYSTEM DESIGN FRAMEWORK:
+1. Requirements: User Experience (UX), Device constraints, Accessibility (a11y), Performance goals.
+2. Architecture: Component hierarchy, Routing, Client-side vs Server-side rendering (CSR/SSR).
+3. State Management: Local vs Global state, API Data caching (React Query/Apollo), Normalization.
+4. Performance: Critical Rendering Path, Lazy loading, Bundle size, Network optimization.
+5. API Interface: Polling vs WebSockets, Error handling, Optimistic updates.
 `;
 
 export const DSA_RUBRIC = `
 CODING INTERVIEW RUBRIC:
-
-1. Problem Solving
-- Ask clarification questions.
-- Discuss multiple approaches (Brute force -> Optimal).
-- Analyze Time/Space complexity.
-* Red Flag: Jumping to code without understanding, silent thinking.
-
-2. Coding
-- Clean, readable code.
-- Standard variable naming.
-- Idiomatic language usage.
-
-3. Verification
-- Proactive verification (Dry run).
-- Check edge cases (Null, Empty, Large inputs).
-- Don't rely on interviewer to find bugs.
-
-4. Communication
-- Explain thought process while coding.
-- Take hints well.
+1. Problem Solving: Ask clarifications, analyze constraints, Big-O analysis.
+2. Coding: Clean, modular, syntactically correct code.
+3. Verification: Dry run with examples, check edge cases (empty, null, large inputs).
+4. Communication: Think out loud, explain tradeoffs.
 `;
 
 export const FULL_INTERVIEW_GUIDE = `
-# ML System Design in a Hurry: Delivery Framework
+# System Design Interview Delivery Frameworks
 
-The best way to structure your system design interviews is to focus on the most important aspects. 
+## 1. Backend / Distributed Systems
+*   **Requirements**: Functional & Non-Functional (CAP theorem, Scale).
+*   **Data**: Schema design is critical. Choose SQL/NoSQL wisely.
+*   **Design**: Draw boxes & arrows. Discuss Load Balancers, Caches, DBs.
+*   **Deep Dive**: Pick one component (e.g., "How to scale the counter?").
 
-## 1. Problem Framing (5-7 minutes)
-Your job is to:
-1.  **Clarify the problem**: Ask targeted questions (Users? Scale? Latency? Constraints?).
-2.  **Establish Business Objective**: "Increase revenue" is vague. "Reduce unwanted exposure of harmful content" is specific.
-3.  **Decide on ML Objective**: Translate business goal to ML task (e.g., Ranking, Classification) and metric (e.g., NDCG, Precision@k).
+## 2. Frontend Systems
+*   **RADIO Framework**: Requirements, Architecture, Data/State, Interface, Optimizations.
+*   **Focus**: User experience, bundle splitting, rendering performance (LCP/CLS), accessibility.
 
-*   **Green Flags**: detailed questions, clear business objective, clear ML objective.
-*   **Red Flags**: naive ML objective, no questions asked, unclear design goals.
-
-## 2. High-Level Design (2-3 minutes)
-Set up scaffolding. A simple block diagram showing inputs -> system components -> outputs.
-*   **Focus**: Lifecycle from data inputs to actions taken.
-*   **Avoid**: Getting bogged down in generic database choices.
-
-## 3. Data and Features (10 minutes)
-1.  **Training Data**: Sources? Labels? (Supervised/Semi-supervised/Unsupervised).
-2.  **Features**: Raw data -> Transformations -> Encodings (Embeddings, One-hot).
-*   **Green Flags**: Uses semi-supervised/unsupervised data, impactful features, discusses representation.
-*   **Red Flags**: Laundry list of features, ignores representation details.
-
-## 4. Modeling (10 minutes)
-1.  **Benchmark/Baseline**: Start with a simple heuristic or simple model.
-2.  **Model Selection**: Tradeoffs (e.g., Deep Learning vs. Trees).
-3.  **Model Architecture**: Loss functions, layers, activations.
-*   **Green Flags**: Starts with baseline, discusses tradeoffs, details architecture.
-*   **Red Flags**: Jumps to complex model immediately, hand-waves details.
-
-## 5. Inference and Evaluation (7 minutes)
-1.  **Evaluation**: Offline metrics vs. Online (A/B testing). Link back to Business Objective.
-2.  **Inference**: Latency, caching, scaling, quantization.
-*   **Green Flags**: Metrics tie to business, practical inference constraints considered.
-*   **Red Flags**: Metrics disconnected from business, ignores inference costs.
+## 3. Machine Learning Systems
+*   **Focus**: The lifecycle of data. Feature selection, Model training pipeline, Evaluation metrics, Serving latency.
 
 ---
 
-# Meta Interview Preparation Guide
-
-## Coding Interviews
-Assessed in 4 areas:
-1.  **Problem Solving**: Ask clarification questions. Present multiple solutions. Don't jump to coding immediately.
-2.  **Coding**: Clean, readable, optimized code.
-3.  **Verification**: Proactive verification (dry run). Check edge cases.
-4.  **Communication**: Talk while you code. Explain decisions.
-
-## Behavioral Interview
-Focus on **IMPACT**. Use **STAR** format (Situation, Task, Action, Result).
-Signals assessed:
-*   **Conflict Resolution**: How you resolve disagreements. Focus on the goal, not the person.
-*   **Empathy**: Understanding team members/users.
-*   **Growth**: Receiving feedback, learning from mistakes.
-*   **Proactive**: Acting without being told.
-*   **Perseverance**: Ownership of difficult tasks.
-*   **Ambiguity**: Moving forward when things are unclear.
+# Coding Interviews (DSA)
+1.  **Understand**: Clarify input/output.
+2.  **Plan**: Brute force -> Optimal.
+3.  **Code**: Write it out.
+4.  **Test**: Walk through line-by-line.
 `;

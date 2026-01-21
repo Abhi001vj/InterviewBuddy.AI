@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Settings, Play, Square, Mic, MicOff, Monitor, Code, Video, Sparkles, AlertCircle, Upload, BookOpen, BarChart2, FileText, LayoutTemplate, MessageSquare, ScanEye } from 'lucide-react';
+import { Settings, Play, Square, Mic, MicOff, Monitor, Code, Video, Sparkles, AlertCircle, Upload, BookOpen, BarChart2, FileText, LayoutTemplate, MessageSquare, ScanEye, Loader2, Send } from 'lucide-react';
 import Whiteboard, { WhiteboardRef } from './components/Whiteboard';
 import CodeEditor from './components/CodeEditor';
 import InterviewHUD from './components/InterviewHUD';
@@ -10,13 +10,14 @@ import ConfigurationModal from './components/RubricSettings';
 import FloatingFeedback from './components/FloatingFeedback';
 import MetricsDashboard from './components/MetricsDashboard';
 import FeedbackList from './components/FeedbackList';
-import ChatPanel from './components/ChatPanel'; // New Import
+import ChatPanel from './components/ChatPanel';
 import { useLiveSession } from './hooks/useLiveSession';
 import { useInterviewTracker } from './hooks/useInterviewTracker';
 import { useConfigStore } from './store/configStore';
 import { InterviewConfig, InterviewRound, TargetCompany, TargetRole, TestCase, TestResult, ProgrammingLanguage, InterviewPhase, RealTimeFeedback } from './types';
-import { COMPANIES, ROLES, ROUNDS, TOPICS, STARTER_CODE_TEMPLATES, TEXT_MODELS, LIVE_MODELS } from './constants';
-import { rewriteQuestion, selectBestQuestion, generateDSAChallenge, analyzeCode, generateDetailedFeedback, assessInterviewProgress } from './services/gemini';
+import { COMPANIES, ROLES, ROUNDS, TOPICS, STARTER_CODE_TEMPLATES, TEXT_MODELS, LIVE_MODELS, FAST_TEXT_MODEL } from './constants';
+import { rewriteQuestion, selectBestQuestion, generateDSAChallenge, analyzeCode, generateDetailedFeedback, assessInterviewProgress, generateSolutionTemplate } from './services/gemini';
+import { BACKEND_SYSTEM_DESIGN_RUBRIC, FRONTEND_SYSTEM_DESIGN_RUBRIC, ML_SYSTEM_DESIGN_RUBRIC, DSA_RUBRIC } from './utils/rubrics';
 
 const INITIAL_CONFIG: InterviewConfig = {
   targetCompany: TargetCompany.GOOGLE,
@@ -39,10 +40,11 @@ function App() {
   const [showGuidelines, setShowGuidelines] = useState(false);
   const [showConfigurationModal, setShowConfigurationModal] = useState(false);
   const [showFeedbackList, setShowFeedbackList] = useState(false);
-  const [showChatPanel, setShowChatPanel] = useState(false); // New State
+  const [showChatPanel, setShowChatPanel] = useState(false);
 
   const [question, setQuestion] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState<string>(""); 
+  const isProcessing = !!processingStatus;
   
   // Feedback State
   const [feedbacks, setFeedbacks] = useState<RealTimeFeedback[]>([]);
@@ -53,11 +55,13 @@ function App() {
   const [code, setCode] = useState(STARTER_CODE_TEMPLATES[ProgrammingLanguage.PYTHON]);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [testResults, setTestResults] = useState<TestResult[] | null>(null);
-  const [dsaFeedback, setDsaFeedback] = useState<string | undefined>(undefined);
   const [isRunningCode, setIsRunningCode] = useState(false);
 
+  // Live Chat Input State
+  const [liveInputText, setLiveInputText] = useState("");
+
   const whiteboardRef = useRef<WhiteboardRef>(null);
-  const lastWhiteboardVersion = useRef(0); // Track version for optimization
+  const lastWhiteboardVersion = useRef(0);
 
   // Load Preset when Company Changes
   useEffect(() => {
@@ -67,14 +71,29 @@ function App() {
 
   // Handle Tab Change - Synced with Round Type
   const handleRoundChange = (round: InterviewRound) => {
-      setInterviewConfig(prev => ({ ...prev, roundType: round }));
+      setInterviewConfig(prev => ({ 
+        ...prev, 
+        roundType: round,
+        topic: TOPICS[round][0], // Reset topic to first of the new round
+        customQuestion: ''
+      }));
   };
 
-  // Select Active Guide based on Round
-  const currentRubric = interviewConfig.roundType === InterviewRound.SYSTEM_DESIGN 
-    ? globalConfig.rubrics.ml_design 
-    : globalConfig.rubrics.coding;
+  // Determine which rubric to use
+  const getRubric = () => {
+      if (interviewConfig.roundType === InterviewRound.DSA) return DSA_RUBRIC;
+      
+      switch (interviewConfig.targetRole) {
+          case TargetRole.FRONTEND_ANGULAR: return FRONTEND_SYSTEM_DESIGN_RUBRIC;
+          case TargetRole.ML_ENGINEER:
+          case TargetRole.AI_ENGINEER: return ML_SYSTEM_DESIGN_RUBRIC;
+          default: return BACKEND_SYSTEM_DESIGN_RUBRIC;
+      }
+  };
 
+  const currentRubric = getRubric();
+  
+  // Fallback to global guide, could be customized similarly
   const currentGuideline = interviewConfig.roundType === InterviewRound.SYSTEM_DESIGN 
     ? globalConfig.guidelines.ml_design 
     : globalConfig.guidelines.coding;
@@ -92,6 +111,7 @@ function App() {
     runAssessment
   } = useInterviewTracker({
     roundType: interviewConfig.roundType,
+    targetRole: interviewConfig.targetRole,
     transcript: [], 
     whiteboardRef,
     code,
@@ -103,68 +123,44 @@ function App() {
   // Logic Handlers
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setIsProcessing(true);
+      setProcessingStatus("Analyzing file...");
       const file = e.target.files[0];
       const text = await file.text();
       const questions = text.split('\n').map(q => q.trim()).filter(q => q.length > 5);
       
       if (questions.length > 0) {
-        const bestQuestion = await selectBestQuestion(questions, interviewConfig.targetCompany, interviewConfig.targetRole, interviewConfig.textModel);
+        // Use FAST_TEXT_MODEL for quick selection
+        const bestQuestion = await selectBestQuestion(questions, interviewConfig.targetCompany, interviewConfig.targetRole, FAST_TEXT_MODEL);
         setInterviewConfig(prev => ({ ...prev, customQuestion: bestQuestion }));
         setQuestion(bestQuestion);
       }
-      setIsProcessing(false);
+      setProcessingStatus("");
     }
   };
 
   const handleRewrite = async () => {
     const sourceQ = interviewConfig.customQuestion || interviewConfig.topic;
     if (!sourceQ) return;
-    setIsProcessing(true);
-    const rewritten = await rewriteQuestion(sourceQ, interviewConfig.targetCompany, interviewConfig.targetRole, interviewConfig.roundType, interviewConfig.textModel);
+    setProcessingStatus("Refining question style...");
+    // Use FAST_TEXT_MODEL for rewriting
+    const rewritten = await rewriteQuestion(sourceQ, interviewConfig.targetCompany, interviewConfig.targetRole, interviewConfig.roundType, FAST_TEXT_MODEL);
     setInterviewConfig(prev => ({ ...prev, customQuestion: rewritten }));
     setQuestion(rewritten);
-    setIsProcessing(false);
+    setProcessingStatus("");
   };
 
-  const handleLanguageChange = (lang: ProgrammingLanguage) => {
+  const handleLanguageChange = async (lang: ProgrammingLanguage) => {
       setInterviewConfig(prev => ({ ...prev, language: lang }));
-      if (code.length < 200) {
+      
+      // If we are already in an active problem, regenerate the template for the new language
+      // to ensure method signatures match.
+      if (question && question.length > 10) {
+          setCode(`// Regenerating starter code for ${lang}...\n// Please wait.`);
+          const template = await generateSolutionTemplate(question, lang, FAST_TEXT_MODEL);
+          setCode(template);
+      } else {
           setCode(STARTER_CODE_TEMPLATES[lang]);
       }
-  };
-
-  const handleRunCode = async () => {
-    setIsRunningCode(true);
-    const results = await analyzeCode(code, question, testCases, interviewConfig.language, interviewConfig.textModel);
-    setTestResults(results.results);
-    setDsaFeedback(results.feedback);
-    setIsRunningCode(false);
-  };
-
-  const [transcriptData, setTranscriptData] = useState<{role: string, text: string}[]>([]);
-
-  const handleTranscriptUpdate = (role: 'user' | 'model', text: string) => {
-      setTranscriptData(prev => [...prev, { role, text }]);
-  };
-
-  const getVisualContext = async () => {
-    if (interviewConfig.roundType === InterviewRound.SYSTEM_DESIGN && whiteboardRef.current) {
-      const base64 = await whiteboardRef.current.getSnapshot();
-      return { type: 'image', data: base64 } as const;
-    } 
-    return null;
-  };
-  
-  // Callback for useLiveSession to check if visual data needs sending
-  const shouldSendVisual = () => {
-      if (interviewConfig.roundType !== InterviewRound.SYSTEM_DESIGN || !whiteboardRef.current) return false;
-      const currentVersion = whiteboardRef.current.getVersion();
-      if (currentVersion > lastWhiteboardVersion.current) {
-          lastWhiteboardVersion.current = currentVersion;
-          return true;
-      }
-      return false;
   };
 
   const systemPrompt = `You are a strict but fair Senior Interviewer at ${interviewConfig.targetCompany}.
@@ -180,43 +176,89 @@ function App() {
 
   INSTRUCTIONS:
   Act as the interviewer. Be professional.
-  ${interviewConfig.roundType === InterviewRound.DSA ? 'Focus on verification and edge cases.' : 'Focus on tradeoffs and scale.'}
+  ${interviewConfig.roundType === InterviewRound.DSA ? 'Focus on verification and edge cases.' : 'Focus on tradeoffs, scalability, and specific technology choices relevant to the role.'}
   `;
 
-  const { connect, disconnect, isConnected, isSpeaking, error, transcript: liveTranscript } = useLiveSession({
+  const [transcriptData, setTranscriptData] = useState<{role: string, text: string}[]>([]);
+
+  const handleTranscriptUpdate = (role: 'user' | 'model', text: string) => {
+      setTranscriptData(prev => [...prev, { role, text }]);
+  };
+
+  const getVisualContext = async () => {
+    if (interviewConfig.roundType === InterviewRound.SYSTEM_DESIGN && whiteboardRef.current) {
+      const base64 = await whiteboardRef.current.getSnapshot();
+      return { type: 'image', data: base64 } as const;
+    } 
+    return null;
+  };
+  
+  const shouldSendVisual = () => {
+      if (interviewConfig.roundType !== InterviewRound.SYSTEM_DESIGN || !whiteboardRef.current) return false;
+      const currentVersion = whiteboardRef.current.getVersion();
+      if (currentVersion > lastWhiteboardVersion.current) {
+          lastWhiteboardVersion.current = currentVersion;
+          return true;
+      }
+      return false;
+  };
+
+  const { connect, disconnect, isConnected, isSpeaking, error, transcript: liveTranscript, sendTextMessage, isMicPermissionDenied } = useLiveSession({
     onTranscriptUpdate: handleTranscriptUpdate,
     getVisualContext,
     systemInstruction: systemPrompt,
     onToolCall: async (calls) => [],
     model: interviewConfig.liveModel,
-    shouldSendVisual // Optimized visual streaming
+    shouldSendVisual
   });
 
+  const handleRunCode = async () => {
+    setIsRunningCode(true);
+    // Execute code analysis logic (Verification)
+    const results = await analyzeCode(code, question, testCases, interviewConfig.language, interviewConfig.textModel);
+    setTestResults(results.results);
+    setIsRunningCode(false);
+
+    // Notify Live AI about the execution results so it can provide verbal feedback.
+    if (isConnected) {
+        const passedCount = results.results.filter(r => r.passed).length;
+        const totalCount = results.results.length;
+        
+        // This message mimics the user stating they ran the code, prompting the AI to review it.
+        const summaryMsg = `I have executed the code.\n\nResult: ${passedCount}/${totalCount} test cases passed.\n\nPlease review my code quality, time/space complexity, and approach.`;
+        sendTextMessage(summaryMsg);
+    }
+  };
+
   const initializeInterview = async () => {
-    setIsProcessing(true);
+    setProcessingStatus("Initializing...");
     let finalQuestion = interviewConfig.customQuestion || interviewConfig.topic;
     
     if (!interviewConfig.customQuestion.includes('Style as')) {
-         const styled = await rewriteQuestion(finalQuestion, interviewConfig.targetCompany, interviewConfig.targetRole, interviewConfig.roundType, interviewConfig.textModel);
+         setProcessingStatus(`Adapting question for ${interviewConfig.targetCompany}...`);
+         // Use FAST_TEXT_MODEL for speed
+         const styled = await rewriteQuestion(finalQuestion, interviewConfig.targetCompany, interviewConfig.targetRole, interviewConfig.roundType, FAST_TEXT_MODEL);
          finalQuestion = styled;
     }
     
     setQuestion(finalQuestion);
 
     if (interviewConfig.roundType === InterviewRound.DSA) {
-      const challenge = await generateDSAChallenge(finalQuestion, interviewConfig.language, interviewConfig.textModel);
+      setProcessingStatus("Generating boilerplate & test cases...");
+      // Use FAST_TEXT_MODEL for speed
+      const challenge = await generateDSAChallenge(finalQuestion, interviewConfig.language, FAST_TEXT_MODEL);
       setCode(challenge.starterCode);
       setTestCases(challenge.testCases);
       setTestResults(null);
-      setDsaFeedback(undefined);
     }
     
-    setIsProcessing(false);
+    setProcessingStatus("Connecting to Live AI...");
     setShowConfig(false);
     setFeedbackReport(null);
     setFeedbacks([]);
     startTracker();
-    connect();
+    await connect();
+    setProcessingStatus("");
   };
 
   const handleEndSession = async () => {
@@ -241,7 +283,6 @@ function App() {
     }
   };
 
-  // Manual Evaluation Trigger
   const handleEvaluateDrawing = async () => {
       if (whiteboardRef.current) {
           const snapshot = await whiteboardRef.current.getSnapshot();
@@ -267,13 +308,21 @@ function App() {
       }
   };
 
+  const handleLiveTextSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (liveInputText.trim()) {
+          sendTextMessage(liveInputText);
+          setLiveInputText("");
+      }
+  };
+
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-200 font-sans selection:bg-blue-500/30">
       
       {/* Left Panel - Workspace */}
       <div className="flex-1 flex flex-col border-r border-slate-800 relative">
         
-        {/* Interview HUD (Always visible) */}
+        {/* Interview HUD */}
         <InterviewHUD 
             phases={phases}
             currentPhaseIndex={currentPhaseIndex}
@@ -354,7 +403,6 @@ function App() {
                 isRunning={isRunningCode}
                 testCases={testCases}
                 testResults={testResults}
-                feedback={dsaFeedback}
                 language={interviewConfig.language}
                 onLanguageChange={handleLanguageChange}
                 problemDescription={question || interviewConfig.customQuestion || interviewConfig.topic}
@@ -498,8 +546,8 @@ function App() {
                                 disabled={isProcessing || (!interviewConfig.customQuestion && !interviewConfig.topic)}
                                 className="absolute bottom-3 right-3 text-[10px] bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-2 py-1.5 rounded-md flex items-center gap-1 transition-colors shadow-sm"
                             >
-                                <Sparkles size={10} />
-                                {isProcessing ? 'Thinking...' : `Style as ${interviewConfig.targetCompany}`}
+                                {isProcessing ? <Loader2 size={10} className="animate-spin"/> : <Sparkles size={10} />}
+                                {isProcessing ? 'Working...' : `Style as ${interviewConfig.targetCompany}`}
                             </button>
                         </div>
                     </div>
@@ -520,13 +568,40 @@ function App() {
                            {isSpeaking && <div className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-20"></div>}
                            <div className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 ${isSpeaking ? 'bg-blue-500/10 scale-105' : 'bg-slate-800'}`}>
                                <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 ${isSpeaking ? 'bg-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.6)]' : 'bg-slate-700 border-2 border-green-500/50'}`}>
-                                   <Mic size={24} className="text-white" />
+                                   {isMicPermissionDenied ? <MicOff size={24} className="text-red-400" /> : <Mic size={24} className="text-white" />}
                                </div>
                            </div>
                        </div>
                        <div>
                           <div className="text-sm font-medium text-white mb-1">AI Interviewer Active</div>
-                          <div className="text-xs text-slate-500">{isSpeaking ? "Speaking..." : "Listening..."}</div>
+                          <div className="text-xs text-slate-500">
+                              {isSpeaking ? "Speaking..." : isMicPermissionDenied ? "Microphone Disabled" : "Listening..."}
+                          </div>
+                       </div>
+                       
+                       {/* Live Text Input for fallback */}
+                       <div className="w-full max-w-xs animate-fadeIn">
+                            <form onSubmit={handleLiveTextSubmit} className="relative">
+                                <input 
+                                    type="text" 
+                                    value={liveInputText}
+                                    onChange={(e) => setLiveInputText(e.target.value)}
+                                    placeholder="Type to speak..."
+                                    className="w-full bg-slate-800 border border-slate-700 rounded-full pl-4 pr-10 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all shadow-sm"
+                                />
+                                <button 
+                                    type="submit"
+                                    disabled={!liveInputText.trim()}
+                                    className="absolute right-1 top-1 p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-full transition-colors disabled:opacity-50 disabled:bg-slate-700"
+                                >
+                                    <Send size={12} />
+                                </button>
+                            </form>
+                            {isMicPermissionDenied && (
+                                <p className="text-[10px] text-red-400 mt-2">
+                                    Microphone access denied. You can communicate via text.
+                                </p>
+                            )}
                        </div>
                   </div>
                </div>
@@ -546,7 +621,7 @@ function App() {
         </div>
 
         {/* Action Footer */}
-        <div className="p-6 border-t border-slate-800 bg-slate-950 z-30">
+        <div className="p-6 border-t border-slate-800 bg-slate-900 z-30">
             {error && (
                 <div className="mb-4 p-3 bg-red-900/20 border border-red-900/50 rounded-lg flex items-start gap-3 text-xs text-red-200">
                     <AlertCircle size={14} className="mt-0.5 shrink-0" />
@@ -560,8 +635,8 @@ function App() {
                     disabled={isProcessing}
                     className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                 >
-                    {isProcessing ? <Sparkles className="animate-spin" size={20}/> : <Play size={20} fill="currentColor" />}
-                    {isProcessing ? 'Preparing...' : 'Start Interview'}
+                    {isProcessing ? <Loader2 className="animate-spin" size={20}/> : <Play size={20} fill="currentColor" />}
+                    {isProcessing ? processingStatus : 'Start Interview'}
                 </button>
             ) : (
                 <button 

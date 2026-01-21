@@ -1,7 +1,9 @@
+
 import React from 'react';
 import { InterviewPhase, AssessmentResult, RealTimeFeedback, InterviewRound } from '../types';
 import { Clock, Target, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 import Timeline from './Timeline';
+import { SYSTEM_DESIGN_SCORING_DIMENSIONS, DSA_SCORING_DIMENSIONS } from '../constants';
 
 interface InterviewHUDProps {
   phases: InterviewPhase[];
@@ -27,10 +29,10 @@ const InterviewHUD: React.FC<InterviewHUDProps> = ({
   const phaseTime = currentPhase ? (timeSpent[currentPhase.id] || 0) : 0;
   const targetTime = currentPhase?.duration || 0;
   
-  // Calculate average score
-  const avgScore = Math.round(
-      (scores.depth + scores.clarity + scores.technical + scores.practical) / 4
-  ) || 0;
+  // Calculate average score dynamically based on round type
+  const dimensions = roundType === InterviewRound.DSA ? DSA_SCORING_DIMENSIONS : SYSTEM_DESIGN_SCORING_DIMENSIONS;
+  const totalScore = dimensions.reduce((acc, dim) => acc + (scores[dim.id] || 0), 0);
+  const avgScore = Math.round(totalScore / dimensions.length) || 0;
 
   return (
     <div className="w-full bg-slate-900 border-b border-slate-800 flex flex-col relative z-20 shadow-xl">

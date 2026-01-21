@@ -11,7 +11,6 @@ interface CodeEditorProps {
   isRunning: boolean;
   testCases: TestCase[];
   testResults: TestResult[] | null;
-  feedback?: string;
   language: ProgrammingLanguage;
   onLanguageChange: (lang: ProgrammingLanguage) => void;
   problemDescription?: string;
@@ -24,7 +23,6 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   isRunning, 
   testCases, 
   testResults,
-  feedback,
   language,
   onLanguageChange,
   problemDescription
@@ -187,14 +185,6 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
                             </div>
                             ) : (
                             <div className="space-y-4">
-                                {feedback && (
-                                <div className="p-3 bg-blue-900/20 border border-blue-900/50 rounded text-blue-200 text-xs mb-4">
-                                    <div className="font-bold mb-1 flex items-center gap-2">
-                                        <Terminal size={12} /> Execution Analysis
-                                    </div>
-                                    {feedback}
-                                </div>
-                                )}
                                 {testResults.map((res, idx) => (
                                 <div key={idx} className="flex items-start gap-3 p-2 rounded hover:bg-[#2d2d2d] border border-transparent hover:border-[#333] transition-colors">
                                     <div className="mt-0.5">
